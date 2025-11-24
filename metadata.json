@@ -1,0 +1,5 @@
+{
+  "name": "RecruitAI Sandbox",
+  "description": "A high-performance recruitment assistant that transforms raw notes into polished Job Descriptions and tailored Interview Guides using Gemini 3 Pro with advanced reasoning.",
+  "requestFramePermissions": []
+}
