@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GeneratedContent, ViewMode } from '../types';
-import { FileText, Users, Briefcase, Copy, Check, Share2, Link, DownloadCloud, Mail, CopyPlus, ImageIcon, ThumbsUp, ThumbsDown } from './Icons';
+import { FileText, Users, Briefcase, Copy, Check, Share2, Link, DownloadCloud, Mail, CopyPlus, ImageIcon, ThumbsUp, ThumbsDown, Save, Sparkles, Loader2 } from './Icons';
 import { jsPDF } from "jspdf";
+import { generateJobHeaderImage } from '../services/gemini';
 
 interface ResultDisplayProps {
   content: GeneratedContent;
@@ -22,7 +23,7 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
   const flushList = (keyPrefix: number) => {
     if (inList && listBuffer.length > 0) {
       elements.push(
-        <ul key={`list-${keyPrefix}`} className="list-disc pl-5 mb-4 space-y-2 text-slate-700">
+        <ul key={`list-${keyPrefix}`} className="list-none mb-6 space-y-2 text-slate-700">
           {listBuffer}
         </ul>
       );
@@ -85,7 +86,7 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
     if (trimmed.startsWith('```')) {
       if (inCodeBlock) {
         elements.push(
-          <div key={`code-${index}`} className="mb-4 rounded-lg overflow-hidden border border-slate-700">
+          <div key={`code-${index}`} className="mb-6 rounded-lg overflow-hidden border border-slate-700">
             <div className="bg-slate-800 px-4 py-2 text-xs text-slate-400 border-b border-slate-700 flex items-center gap-2">
                <div className="flex gap-1.5">
                  <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
@@ -121,9 +122,33 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
       flushTable(index);
     }
 
-    // Lists
+    // Blockquotes
+    if (trimmed.startsWith('> ')) {
+       flushList(index);
+       const quoteText = trimmed.substring(2);
+       elements.push(
+         <blockquote key={`quote-${index}`} className="border-l-4 border-indigo-300 pl-4 py-1 mb-5 italic text-slate-600 bg-slate-50/50 rounded-r-lg">
+           {quoteText}
+         </blockquote>
+       );
+       return;
+    }
+
+    // Horizontal Rules
+    if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
+      flushList(index);
+      elements.push(<hr key={`hr-${index}`} className="my-8 border-slate-200" />);
+      return;
+    }
+
+    // Lists (Enhanced for Nesting)
     if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
       inList = true;
+      
+      // Check indentation to determine nesting level approx
+      const leadingSpaces = line.search(/\S|$/);
+      const isNested = leadingSpaces >= 2;
+
       const text = trimmed.substring(2);
       const parts = text.split(/(\*\*.*?\*\*)/g).map((part, i) => {
         if (part.startsWith('**') && part.endsWith('**')) {
@@ -132,7 +157,12 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
         return part;
       });
 
-      listBuffer.push(<li key={`li-${index}`}>{parts}</li>);
+      listBuffer.push(
+        <li key={`li-${index}`} className={`leading-relaxed flex items-start gap-2 ${isNested ? 'ml-6 mt-1 text-sm' : ''}`}>
+           <span className={`mt-2 rounded-full bg-indigo-500 flex-shrink-0 ${isNested ? 'w-1 h-1 opacity-70' : 'w-1.5 h-1.5'}`}></span>
+           <span>{parts}</span>
+        </li>
+      );
       return;
     }
 
@@ -140,11 +170,11 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
 
     // Headers
     if (trimmed.startsWith('### ')) {
-      elements.push(<h3 key={index} className="text-lg font-bold text-slate-800 mt-6 mb-3 flex items-center gap-2"><div className="h-1 w-6 bg-indigo-500 rounded-full"></div>{trimmed.substring(4)}</h3>);
+      elements.push(<h3 key={index} className="text-lg font-bold text-slate-800 mt-8 mb-4 flex items-center gap-2"><div className="h-1 w-6 bg-indigo-500 rounded-full"></div>{trimmed.substring(4)}</h3>);
     } else if (trimmed.startsWith('## ')) {
-      elements.push(<h2 key={index} className="text-xl font-bold text-slate-900 mt-8 mb-4 border-b border-slate-200 pb-2">{trimmed.substring(3)}</h2>);
+      elements.push(<h2 key={index} className="text-xl font-bold text-slate-900 mt-10 mb-5 border-b border-slate-200 pb-2">{trimmed.substring(3)}</h2>);
     } else if (trimmed.startsWith('# ')) {
-      elements.push(<h1 key={index} className="text-2xl font-bold text-slate-900 mt-2 mb-4">{trimmed.substring(2)}</h1>);
+      elements.push(<h1 key={index} className="text-2xl font-bold text-slate-900 mt-4 mb-6">{trimmed.substring(2)}</h1>);
     } 
     // Paragraphs
     else if (trimmed) {
@@ -154,7 +184,7 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
         }
         return part;
       });
-      elements.push(<p key={index} className="mb-4 text-slate-700 leading-relaxed">{parts}</p>);
+      elements.push(<p key={index} className="mb-5 text-slate-700 leading-relaxed">{parts}</p>);
     }
   });
 
@@ -190,7 +220,16 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ content }) => {
   const [copied, setCopied] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const [shared, setShared] = useState(false);
+  const [savedResult, setSavedResult] = useState(false);
   const [exporting, setExporting] = useState(false);
+  
+  // Image Generation State
+  const [headerImage, setHeaderImage] = useState<string | null>(content.headerImageUrl || null);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+
+  // Individual Section Copy State
+  const [copiedResponsibilities, setCopiedResponsibilities] = useState(false);
+  const [copiedJD, setCopiedJD] = useState(false);
   
   // New state for individual question copy
   const [copiedQuestionIndex, setCopiedQuestionIndex] = useState<number | null>(null);
@@ -200,18 +239,50 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ content }) => {
 
   const bannerStyle = generateBannerStyle(content.jobTitle);
 
+  // Effect to update local image state if content changes externally (e.g. loading a result)
+  useEffect(() => {
+    setHeaderImage(content.headerImageUrl || null);
+  }, [content.headerImageUrl]);
+
+  const handleGenerateImage = async () => {
+    setIsGeneratingImage(true);
+    const imgData = await generateJobHeaderImage(content.jobTitle);
+    if (imgData) {
+      setHeaderImage(imgData);
+    }
+    setIsGeneratingImage(false);
+  };
+
   const handleCopy = () => {
-    const textToCopy = viewMode === 'JD' 
-      ? content.jobDescription 
-      : content.interviewGuide.map(q => `Q: ${q.question}\nFocus: ${q.focusArea}\nRationale: ${q.rationale}`).join('\n\n');
+    let textToCopy = '';
+    if (viewMode === 'JD') {
+      const responsibilities = content.keyResponsibilities.map(r => `• ${r}`).join('\n');
+      textToCopy = `KEY RESPONSIBILITIES:\n${responsibilities}\n\nJOB DESCRIPTION:\n${content.jobDescription}`;
+    } else {
+      textToCopy = content.interviewGuide.map(q => `Q: ${q.question}\nFocus: ${q.focusArea}\nRationale: ${q.rationale}`).join('\n\n');
+    }
     
     navigator.clipboard.writeText(textToCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleCopyResponsibilities = () => {
+    const text = content.keyResponsibilities.map(r => `• ${r}`).join('\n');
+    navigator.clipboard.writeText(text);
+    setCopiedResponsibilities(true);
+    setTimeout(() => setCopiedResponsibilities(false), 2000);
+  };
+
+  const handleCopyJD = () => {
+    navigator.clipboard.writeText(content.jobDescription);
+    setCopiedJD(true);
+    setTimeout(() => setCopiedJD(false), 2000);
+  };
+
   const handleCopyAll = () => {
-    const allText = `JOB TITLE: ${content.jobTitle}\n\n=== JOB DESCRIPTION ===\n\n${content.jobDescription}\n\n=== INTERVIEW GUIDE ===\n\n` + 
+    const responsibilities = content.keyResponsibilities.map(r => `• ${r}`).join('\n');
+    const allText = `JOB TITLE: ${content.jobTitle}\n\n=== KEY RESPONSIBILITIES ===\n${responsibilities}\n\n=== JOB DESCRIPTION ===\n${content.jobDescription}\n\n=== INTERVIEW GUIDE ===\n\n` + 
       content.interviewGuide.map((q, i) => `${i+1}. ${q.question}\n   Focus: ${q.focusArea}\n   Rationale: ${q.rationale}`).join('\n\n');
     
     navigator.clipboard.writeText(allText);
@@ -219,9 +290,20 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ content }) => {
     setTimeout(() => setCopiedAll(false), 2000);
   }
 
+  const handleSaveResult = () => {
+    // Merge current image into content before saving
+    const contentToSave = {
+      ...content,
+      headerImageUrl: headerImage || undefined
+    };
+    localStorage.setItem('recruitAI_saved_result', JSON.stringify(contentToSave));
+    setSavedResult(true);
+    setTimeout(() => setSavedResult(false), 2000);
+  };
+
   const handleShare = () => {
-    const uniqueId = Math.random().toString(36).substring(2, 10);
-    const mockUrl = `https://recruitai.sandbox/share/${uniqueId}`;
+    const uniqueId = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    const mockUrl = `https://recruitai.app/s/${uniqueId}`;
     navigator.clipboard.writeText(mockUrl);
     setShared(true);
     setTimeout(() => setShared(false), 2000);
@@ -231,7 +313,7 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ content }) => {
      const subject = encodeURIComponent(`Recruitment Package: ${content.jobTitle}`);
      const body = encodeURIComponent(
       `Here is the recruitment package for the ${content.jobTitle} role.\n\n` +
-      `Check it out here: https://recruitai.sandbox/share/${Math.random().toString(36).substring(2, 8)}\n\n` +
+      `View the full package here: https://recruitai.app/s/${Math.random().toString(36).substring(2, 10)}\n\n` +
       `-- Generated by RecruitAI`
      );
      window.open(`mailto:?subject=${subject}&body=${body}`);
@@ -265,13 +347,33 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ content }) => {
       doc.setTextColor(79, 70, 229); // Indigo
       const titleLines = doc.splitTextToSize(content.jobTitle, contentWidth);
       doc.text(titleLines, margin, y);
-      y += (titleLines.length * 8) + 15;
+      y += (titleLines.length * 8) + 10;
+
+      // Key Responsibilities
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 41, 59);
+      doc.text("Key Responsibilities", margin, y);
+      y += 10;
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(51, 65, 85);
+      
+      content.keyResponsibilities.forEach(item => {
+        const itemText = `•  ${item}`;
+        const itemLines = doc.splitTextToSize(itemText, contentWidth);
+        checkPageBreak(itemLines.length * 6);
+        doc.text(itemLines, margin, y);
+        y += itemLines.length * 6;
+      });
+      y += 10;
 
       // Job Description Section
       doc.setFontSize(16);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(30, 41, 59); // Slate-800
-      doc.text("Job Description", margin, y);
+      doc.text("Job Details", margin, y);
       y += 12;
 
       doc.setFontSize(11);
@@ -320,6 +422,9 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ content }) => {
            text = text.replace(/\|/g, '  '); 
            fontSize = 9;
            fontType = "courier";
+        } else if (text.startsWith('> ')) {
+           text = '"' + text.substring(2) + '"';
+           fontType = "italic";
         }
 
         text = text.replace(/\*\*/g, '');
@@ -414,21 +519,52 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ content }) => {
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto bg-white relative">
         
-        {/* Placeholder Banner Image */}
+        {/* Banner Image */}
         <div 
-          className="w-full h-32 relative overflow-hidden flex items-center justify-center"
-          style={bannerStyle}
+          className="w-full h-48 relative overflow-hidden flex items-center justify-center bg-slate-900"
+          style={!headerImage ? bannerStyle : undefined}
         >
-          <div className="absolute inset-0 bg-black/10"></div>
-          <div className="relative z-10 flex items-center gap-2 text-white/90 font-medium px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full border border-white/30">
-             <ImageIcon className="w-4 h-4" />
-             <span className="text-sm">Generated Placeholder Visual</span>
+          {headerImage ? (
+            <img src={headerImage} alt="Job Header" className="w-full h-full object-cover" />
+          ) : (
+            <div className="absolute inset-0 bg-black/10"></div>
+          )}
+          
+          <div className="absolute bottom-4 right-4 z-10">
+             <button 
+               onClick={handleGenerateImage}
+               disabled={isGeneratingImage}
+               className="flex items-center gap-2 text-xs font-medium px-3 py-2 bg-white/90 hover:bg-white backdrop-blur-md text-slate-800 rounded-lg shadow-lg transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+             >
+               {isGeneratingImage ? (
+                 <>
+                  <Loader2 className="w-3 h-3 animate-spin text-indigo-600" />
+                  Generating Visual...
+                 </>
+               ) : (
+                 <>
+                  <Sparkles className="w-3 h-3 text-indigo-600" />
+                  {headerImage ? 'Regenerate AI Header' : 'Generate AI Header'}
+                 </>
+               )}
+             </button>
           </div>
         </div>
 
         <div className="p-6 sm:p-8 relative min-h-[500px]">
           {/* Action Bar */}
           <div className="absolute top-6 right-6 flex gap-2 z-20">
+             <button 
+              onClick={handleSaveResult}
+              className="p-2 text-slate-400 hover:text-indigo-600 bg-white hover:bg-indigo-50 rounded-lg transition-colors border border-slate-200 shadow-sm relative group"
+              title="Save Results"
+            >
+              {savedResult ? <Check className="w-5 h-5 text-green-500" /> : <Save className="w-5 h-5" />}
+              <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                Save Result
+              </span>
+            </button>
+
              <button 
               onClick={handleExportPDF}
               className="p-2 text-slate-400 hover:text-indigo-600 bg-white hover:bg-indigo-50 rounded-lg transition-colors border border-slate-200 shadow-sm"
@@ -451,7 +587,12 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ content }) => {
               className="p-2 text-slate-400 hover:text-indigo-600 bg-white hover:bg-indigo-50 rounded-lg transition-colors border border-slate-200 shadow-sm flex items-center gap-2 group relative"
               title="Share Link"
             >
-              {shared ? <Link className="w-5 h-5 text-indigo-600" /> : <Share2 className="w-5 h-5" />}
+              {shared ? <Check className="w-5 h-5 text-green-500" /> : <Share2 className="w-5 h-5" />}
+              {shared && (
+                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2 py-1 bg-green-600 text-white text-xs rounded animate-in fade-in slide-in-from-bottom-1">
+                  Link Copied!
+                </span>
+              )}
             </button>
             
             <button 
@@ -472,8 +613,57 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ content }) => {
           </div>
 
           {viewMode === 'JD' ? (
-            <div className="prose prose-slate max-w-3xl mx-auto mt-4">
-              <MarkdownRenderer content={content.jobDescription} />
+            <div className="max-w-3xl mx-auto mt-4">
+              {/* Key Responsibilities Section */}
+              {content.keyResponsibilities && content.keyResponsibilities.length > 0 && (
+                <div className="mb-10 bg-indigo-50/50 p-6 rounded-2xl border border-indigo-100 relative group">
+                   <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={handleCopyResponsibilities}
+                        className="p-1.5 bg-white text-indigo-600 rounded-md shadow-sm hover:bg-indigo-50 border border-indigo-100"
+                        title="Copy Responsibilities"
+                      >
+                        {copiedResponsibilities ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                   </div>
+                  <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                    <div className="p-1.5 bg-indigo-100 rounded-lg text-indigo-600 shadow-sm">
+                      <Briefcase className="w-4 h-4"/>
+                    </div>
+                    Key Responsibilities
+                  </h3>
+                  <ul className="grid gap-3">
+                    {content.keyResponsibilities.map((item, i) => (
+                      <li key={i} className="flex items-start gap-3 text-slate-700 bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:border-indigo-300 transition-colors">
+                        <Check className="w-5 h-5 text-indigo-500 flex-shrink-0 mt-0.5" />
+                        <span className="leading-relaxed">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Markdown Content */}
+              <div className="relative group">
+                <div className="flex items-center justify-between mb-4 border-b border-slate-200 pb-2">
+                   <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      <div className="p-1.5 bg-indigo-100 rounded-lg text-indigo-600 shadow-sm">
+                        <FileText className="w-4 h-4"/>
+                      </div>
+                      Role Details
+                   </h3>
+                   <button 
+                      onClick={handleCopyJD}
+                      className="p-1.5 bg-white text-slate-500 rounded-md shadow-sm hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Copy Job Description Text"
+                    >
+                      {copiedJD ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                </div>
+                <div className="prose prose-slate max-w-none">
+                  <MarkdownRenderer content={content.jobDescription} />
+                </div>
+              </div>
             </div>
           ) : (
             <div className="space-y-6 max-w-4xl mx-auto mt-4">

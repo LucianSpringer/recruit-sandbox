@@ -1,13 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Bot, Send, X, MessageSquare, Loader2 } from './Icons';
-import { ChatMessage } from '../types';
+import { ChatMessage, GeneratedContent } from '../types';
 import { sendChatMessage } from '../services/gemini';
 
 interface ChatWidgetProps {
-  context?: string; // Optional context from the generated JD to inform the chat
+  content: GeneratedContent | null; 
 }
 
-const ChatWidget: React.FC<ChatWidgetProps> = ({ context }) => {
+const ChatWidget: React.FC<ChatWidgetProps> = ({ content }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'model', text: 'Hi! I can help you refine your recruitment strategy or answer questions about the generated content.', timestamp: Date.now() }
@@ -39,8 +39,21 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ context }) => {
         parts: [{ text: m.text }]
       }));
 
-      // Send context as a separate parameter which maps to systemInstruction
-      const responseText = await sendChatMessage(history, inputValue, context);
+      // Construct rich context string
+      let contextString = undefined;
+      if (content) {
+        contextString = `
+JOB TITLE: ${content.jobTitle}
+
+KEY RESPONSIBILITIES:
+${content.keyResponsibilities.map(r => `- ${r}`).join('\n')}
+
+JOB DESCRIPTION:
+${content.jobDescription}
+`;
+      }
+
+      const responseText = await sendChatMessage(history, inputValue, contextString);
       
       const botMsg: ChatMessage = { 
         role: 'model', 

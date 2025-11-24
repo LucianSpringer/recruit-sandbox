@@ -7,6 +7,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const GENERATION_MODEL = 'gemini-3-pro-preview';
 const CHAT_MODEL = 'gemini-3-pro-preview';
+const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 /**
  * Generates the Job Description and Interview Guide based on raw notes.
@@ -23,6 +24,7 @@ export const generateRecruitmentPackage = async (
     
     Target Experience Level: ${experienceLevel}
     ${companyContext.jobTitle ? `Target Job Title: ${companyContext.jobTitle}` : ''}
+    ${companyContext.jobFamily ? `Job Family: ${companyContext.jobFamily}` : ''}
     
     Company Context:
     ${companyContext.mission ? `- Mission: ${companyContext.mission}` : '- Mission: Not specified'}
@@ -32,15 +34,18 @@ export const generateRecruitmentPackage = async (
     Raw Notes:
     "${rawNotes}"
     
-    You must generate two things:
-    1. A polished, professional LinkedIn-ready Job Description (Markdown formatted).
-       - It MUST be tailored to the "${experienceLevel}" level in terms of language complexity, responsibility scope, and requirements.
-       - If company context is provided, you MUST weave the mission, values, and culture into the description to attract culturally aligned candidates.
+    You must generate a structured JSON object containing:
+    1. jobTitle: A polished, professional job title.
+    2. keyResponsibilities: A list of 5-7 distinct, actionable key responsibilities or core duties.
+    3. jobDescription: A polished, professional LinkedIn-ready Job Description in Markdown format.
+       - IMPORTANT: Do NOT include the "Key Responsibilities" list in this markdown field, as it will be displayed separately.
+       - Include sections for: Role Summary, Qualifications/Requirements, Benefits/Perks, and Company Culture (weaving in the mission/values).
+       - Tailor language complexity to the "${experienceLevel}" level.
+       - Use standard markdown (headings, bullet points, bold text) for formatting.
     
-    2. An Interview Guide with 10 behavioral questions.
-       - The complexity and depth of the questions MUST match the "${experienceLevel}" level.
-       - Questions must target the specific hard and soft skills identified in the JD.
-       - Include questions that assess fit with the provided Core Values and Culture.
+    4. interviewGuide: An Interview Guide with 10 behavioral questions.
+       - The complexity must match the "${experienceLevel}" level.
+       - Rationale: You MUST explicitly link the rationale to a specific skill, qualification, or company value mentioned in the Job Description. Explain exactly WHY this question is critical for this specific role.
   `;
 
   try {
@@ -55,7 +60,12 @@ export const generateRecruitmentPackage = async (
           type: Type.OBJECT,
           properties: {
             jobTitle: { type: Type.STRING, description: "A catchy, professional job title." },
-            jobDescription: { type: Type.STRING, description: "The full job description in Markdown format." },
+            keyResponsibilities: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: "List of 5-7 distinct key responsibilities."
+            },
+            jobDescription: { type: Type.STRING, description: "The Job Description narrative (Role Summary, Qualifications, Benefits, Culture) in Markdown. Exclude the Key Responsibilities list." },
             interviewGuide: {
               type: Type.ARRAY,
               description: "List of 10 behavioral interview questions.",
@@ -63,14 +73,14 @@ export const generateRecruitmentPackage = async (
                 type: Type.OBJECT,
                 properties: {
                   question: { type: Type.STRING },
-                  focusArea: { type: Type.STRING, description: "The skill or trait being assessed (e.g., 'Conflict Resolution')." },
-                  rationale: { type: Type.STRING, description: "Why this question is relevant to the JD and Level." }
+                  focusArea: { type: Type.STRING, description: "The skill or trait being assessed." },
+                  rationale: { type: Type.STRING, description: "Explain WHY this question is asked, explicitly citing a specific skill or value from the JD." }
                 },
                 required: ["question", "focusArea", "rationale"]
               }
             }
           },
-          required: ["jobTitle", "jobDescription", "interviewGuide"]
+          required: ["jobTitle", "keyResponsibilities", "jobDescription", "interviewGuide"]
         }
       }
     });
@@ -82,6 +92,35 @@ export const generateRecruitmentPackage = async (
   } catch (error) {
     console.error("Gemini Generation Error:", error);
     throw error;
+  }
+};
+
+/**
+ * Generates a header image for the job description.
+ */
+export const generateJobHeaderImage = async (jobTitle: string): Promise<string | null> => {
+  try {
+    // Using gemini-2.5-flash-image as per guidelines for general image generation
+    const response = await ai.models.generateContent({
+      model: IMAGE_MODEL,
+      contents: {
+        parts: [{ 
+          text: `A professional, modern, abstract digital art background image suitable for a job posting header for the role of "${jobTitle}". 
+                 Use corporate but creative color tones (blues, purples, clean white). 
+                 Minimalist, high quality, 4k resolution, wide aspect ratio.` 
+        }]
+      }
+    });
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error("Image Generation Error:", error);
+    return null; 
   }
 };
 

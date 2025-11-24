@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { generateRecruitmentPackage } from './services/gemini';
-import { AppState, GeneratedContent, ExperienceLevel, CompanyContext } from './types';
+import { AppState, GeneratedContent, ExperienceLevel, CompanyContext, JobFamily } from './types';
 import ResultDisplay from './components/ResultDisplay';
 import ChatWidget from './components/ChatWidget';
 import { 
@@ -17,7 +17,9 @@ import {
   Save,
   DownloadCloud,
   RotateCcw,
-  Check
+  Check,
+  FileText,
+  Users
 } from './components/Icons';
 
 const App: React.FC = () => {
@@ -27,6 +29,7 @@ const App: React.FC = () => {
   const [rawNotes, setRawNotes] = useState('');
   const [inputJobTitle, setInputJobTitle] = useState('');
   const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>('Mid-Level');
+  const [jobFamily, setJobFamily] = useState<JobFamily | ''>('');
   const [companyMission, setCompanyMission] = useState('');
   const [companyValues, setCompanyValues] = useState('');
   const [companyCulture, setCompanyCulture] = useState('');
@@ -52,6 +55,7 @@ const App: React.FC = () => {
         if (parsed.rawNotes) setRawNotes(parsed.rawNotes);
         if (parsed.inputJobTitle) setInputJobTitle(parsed.inputJobTitle);
         if (parsed.experienceLevel) setExperienceLevel(parsed.experienceLevel);
+        if (parsed.jobFamily) setJobFamily(parsed.jobFamily);
         if (parsed.companyMission) setCompanyMission(parsed.companyMission);
         if (parsed.companyValues) setCompanyValues(parsed.companyValues);
         if (parsed.companyCulture) setCompanyCulture(parsed.companyCulture);
@@ -67,12 +71,13 @@ const App: React.FC = () => {
       rawNotes,
       inputJobTitle,
       experienceLevel,
+      jobFamily,
       companyMission,
       companyValues,
       companyCulture
     };
     localStorage.setItem('recruitAI_state', JSON.stringify(state));
-  }, [rawNotes, inputJobTitle, experienceLevel, companyMission, companyValues, companyCulture]);
+  }, [rawNotes, inputJobTitle, experienceLevel, jobFamily, companyMission, companyValues, companyCulture]);
 
   // Dynamic Loading Messages
   useEffect(() => {
@@ -110,7 +115,8 @@ const App: React.FC = () => {
         mission: companyMission,
         values: companyValues,
         culture: companyCulture,
-        jobTitle: inputJobTitle
+        jobTitle: inputJobTitle,
+        jobFamily: jobFamily as JobFamily || undefined
       };
       
       const data = await generateRecruitmentPackage(rawNotes, experienceLevel, companyContext);
@@ -127,6 +133,7 @@ const App: React.FC = () => {
       rawNotes,
       inputJobTitle,
       experienceLevel,
+      jobFamily,
       companyMission,
       companyValues,
       companyCulture,
@@ -145,6 +152,7 @@ const App: React.FC = () => {
         if (parsed.rawNotes !== undefined) setRawNotes(parsed.rawNotes);
         if (parsed.inputJobTitle !== undefined) setInputJobTitle(parsed.inputJobTitle);
         if (parsed.experienceLevel !== undefined) setExperienceLevel(parsed.experienceLevel);
+        if (parsed.jobFamily !== undefined) setJobFamily(parsed.jobFamily);
         if (parsed.companyMission !== undefined) setCompanyMission(parsed.companyMission);
         if (parsed.companyValues !== undefined) setCompanyValues(parsed.companyValues);
         if (parsed.companyCulture !== undefined) setCompanyCulture(parsed.companyCulture);
@@ -161,6 +169,30 @@ const App: React.FC = () => {
     }
   };
 
+  const handleLoadResult = () => {
+    try {
+      const savedResult = localStorage.getItem('recruitAI_saved_result');
+      if (savedResult) {
+        const parsed = JSON.parse(savedResult) as GeneratedContent;
+        setResult(parsed);
+        setAppState(AppState.SUCCESS);
+        setDraftMessage('Result loaded!');
+        setTimeout(() => setDraftMessage(null), 3000);
+      } else {
+        setDraftMessage('No saved result found.');
+        setTimeout(() => setDraftMessage(null), 3000);
+      }
+    } catch (e) {
+      console.error("Failed to load result", e);
+      setDraftMessage('Error loading result.');
+      setTimeout(() => setDraftMessage(null), 3000);
+    }
+  };
+
+  const jobFamilyOptions: JobFamily[] = [
+    'Engineering', 'Marketing', 'Sales', 'HR', 'Finance', 'Product', 'Design', 'Operations', 'Legal', 'Other'
+  ];
+
   return (
     <div className="flex flex-col h-screen bg-slate-50">
       {/* Navbar */}
@@ -176,7 +208,7 @@ const App: React.FC = () => {
         <div className="ml-auto flex items-center gap-4 text-sm text-slate-500">
           <span className="hidden sm:inline">Powered by Gemini 3 Pro</span>
           <div className="h-4 w-px bg-slate-300"></div>
-          <span className="font-medium text-indigo-600">v1.2.0</span>
+          <span className="font-medium text-indigo-600">v1.4.0</span>
         </div>
       </header>
 
@@ -199,54 +231,81 @@ const App: React.FC = () => {
                     Define your requirements. Our thinking model will analyze your inputs to build the perfect package.
                   </p>
                 </div>
-                <div className="flex gap-2 relative">
+              </div>
+              
+              {/* Save/Load Controls Row */}
+              <div className="mb-6 flex flex-wrap gap-2 relative">
                   <button 
                     onClick={handleSaveDraft}
-                    className="p-2 text-slate-600 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 rounded-lg transition-colors border border-slate-200 flex items-center gap-2 text-xs font-medium"
-                    title="Save current inputs as a draft"
+                    className="p-2 text-slate-600 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 rounded-lg transition-colors border border-slate-200 flex items-center gap-2 text-xs font-medium shadow-sm"
+                    title="Save current inputs"
                   >
                     <Save className="w-4 h-4" />
                     Save Draft
                   </button>
                   <button 
                     onClick={handleLoadDraft}
-                    className="p-2 text-slate-600 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 rounded-lg transition-colors border border-slate-200 flex items-center gap-2 text-xs font-medium"
-                    title="Load saved draft"
+                    className="p-2 text-slate-600 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 rounded-lg transition-colors border border-slate-200 flex items-center gap-2 text-xs font-medium shadow-sm"
+                    title="Load saved inputs"
                   >
                     <RotateCcw className="w-4 h-4" />
                     Load Draft
                   </button>
+                  <div className="w-px h-6 bg-slate-200 mx-1 self-center"></div>
+                   <button 
+                    onClick={handleLoadResult}
+                    className="p-2 text-slate-600 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 rounded-lg transition-colors border border-slate-200 flex items-center gap-2 text-xs font-medium shadow-sm"
+                    title="Load previously generated results"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Load Result
+                  </button>
+                  
                   {draftMessage && (
-                    <div className="absolute top-full right-0 mt-2 bg-slate-800 text-white text-xs px-3 py-1.5 rounded-md shadow-lg whitespace-nowrap z-50 flex items-center gap-1.5">
+                    <div className="absolute top-full left-0 mt-2 bg-slate-800 text-white text-xs px-3 py-1.5 rounded-md shadow-lg whitespace-nowrap z-50 flex items-center gap-1.5 animate-in fade-in slide-in-from-top-2">
                       {draftMessage.includes('Error') || draftMessage.includes('No') ? null : <Check className="w-3 h-3 text-green-400" />}
                       {draftMessage}
                     </div>
                   )}
-                </div>
               </div>
 
-              {/* Job Title Input */}
-              <div className="mb-6">
-                <div className="flex items-center gap-2 mb-2">
-                   <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                      <Briefcase className="w-4 h-4 text-indigo-500" />
-                      Job Title <span className="text-slate-400 font-normal">(Optional)</span>
+              {/* Job Title & Family Group */}
+              <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="col-span-2 sm:col-span-1">
+                  <div className="flex items-center gap-2 mb-2">
+                     <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                        <Briefcase className="w-4 h-4 text-indigo-500" />
+                        Job Title <span className="text-slate-400 font-normal">(Opt)</span>
+                     </label>
+                  </div>
+                  <input
+                    type="text"
+                    value={inputJobTitle}
+                    onChange={(e) => setInputJobTitle(e.target.value)}
+                    placeholder="e.g. Senior Product Manager"
+                    className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all font-medium placeholder-slate-400 text-sm"
+                  />
+                </div>
+
+                <div className="col-span-2 sm:col-span-1">
+                   <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-2">
+                      <Users className="w-4 h-4 text-indigo-500" />
+                      Job Family
                    </label>
-                   <div className="group relative">
-                      <Info className="w-4 h-4 text-slate-400 cursor-help hover:text-indigo-500 transition-colors" />
-                      <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 bg-slate-800 text-white text-xs rounded-lg shadow-xl z-50 pointer-events-none">
-                        Specifying a title helps Gemini focus the generated content. If left blank, one will be suggested based on your notes.
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
-                      </div>
+                   <div className="relative">
+                     <select 
+                       value={jobFamily}
+                       onChange={(e) => setJobFamily(e.target.value as JobFamily)}
+                       className="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-700 py-3 px-4 pr-8 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer font-medium text-sm"
+                     >
+                       <option value="">Select Family...</option>
+                       {jobFamilyOptions.map(fam => (
+                         <option key={fam} value={fam}>{fam}</option>
+                       ))}
+                     </select>
+                     <ChevronDown className="absolute right-4 top-3.5 w-4 h-4 text-slate-400 pointer-events-none" />
                    </div>
                 </div>
-                <input
-                  type="text"
-                  value={inputJobTitle}
-                  onChange={(e) => setInputJobTitle(e.target.value)}
-                  placeholder="e.g. Senior Product Manager, Lead React Developer"
-                  className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all font-medium placeholder-slate-400"
-                />
               </div>
 
               {/* Experience Level Selector */}
@@ -426,7 +485,7 @@ const App: React.FC = () => {
       </main>
 
       {/* Chat Bot Assistant */}
-      <ChatWidget context={result?.jobDescription} />
+      <ChatWidget content={result} />
     </div>
   );
 };
